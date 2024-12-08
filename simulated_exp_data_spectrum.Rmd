@@ -1,0 +1,68 @@
+---
+title: "Simulated Exp Data Spectrum"
+author: "Scott Pease"
+date: "2024-11-20"
+output: html_document
+---
+
+**How does the Exponential survival curve change with changing ratio of young:old crabs? And what is the probability of these mixtures?**
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(tibble)
+library(survival)
+library(ggfortify)
+library(glue)
+```
+
+# Probability of different mixtures
+```{r}
+pbinom(seq.int(11,21), 32, prob = 0.5, lower.tail = FALSE)
+plot(seq.int(11,21), pbinom(seq.int(10,20), 32, prob = 0.5, lower.tail = FALSE))
+```
+
+# Simulated Data
+```{r}
+N = 32
+sim_dat = tibble()
+for (N_young in seq.int(((N / 2) - 5), ((N / 2) + 5))) {
+  avg_surv_T = c(rep(400, N_young), rep(40, N - N_young))
+  rates = 1 / avg_surv_T
+  crab_surv_T = rexp(n = length(rates), rate = rates)
+  
+  sim_dat_part = tibble(
+    grp = glue("N_young = {N_young}"),
+    avg_surv_T,
+    crab_surv_T
+  )
+  sim_dat_part = sim_dat_part %>%
+    mutate(
+      censored_surv_T = if_else(crab_surv_T > 71, 71, crab_surv_T),
+      died = if_else(crab_surv_T > 71, 0, 1)
+    )
+  sim_dat = dplyr::bind_rows(sim_dat, sim_dat_part)
+}
+```
+
+# Kaplan-Meier
+```{r}
+km_fit <- survfit(Surv(censored_surv_T, died) ~ grp,
+                  conf.int=0.5,
+                  data=sim_dat)
+```
+
+
+```{r}
+autoplot(km_fit,
+         censor = FALSE,
+         # conf.int = FALSE,
+         xlab = "Days Since Start of Experiment",
+         ylab = "% Alive",
+         main = "Kaplan-Meier Fit of Simulated Control Sand Crab Mortality (with 50% CI)") + 
+  labs(fill="N Young", color="N Young") +
+  scale_y_continuous(labels = scales::percent, limits=c(0,1))
+```

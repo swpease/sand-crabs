@@ -1,0 +1,143 @@
+---
+title: "Sand Crab Mortality"
+author: "Scott Pease"
+date: "2024-10-15"
+output: html_document
+---
+
+# Survival analysis of sand crab data
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(survival)
+library(ggfortify)
+library(readr)
+library(dplyr)
+library(stringr)
+library(purrr)
+```
+
+# Data parsing
+```{r}
+data <- readr::read_csv("../data/zenodo/Horn_Crab Development Data for LOL_mod.csv", 
+    col_types = cols(
+      `Crab #` = col_integer(), 
+      `C or T` = col_factor(levels = c("c", "t")), 
+      `Collection Date` = col_date(format = "%m/%d/%y"), 
+      `Adult Death date` = col_date(format = "%m/%d/%y"), 
+      `# of days alive` = col_integer(), 
+      `Enviro Plastics present Y/N` = col_factor(levels = c("Y", "N")),
+      `# of Yellow fibers ingested` = col_integer(), 
+      `# of Parasites` = col_integer(), 
+      `# of days with viable eggs` = col_integer(), 
+      `Reach Larval Stage(9+) Y/N` = col_factor(levels = c("y", "n")), 
+      `Molt Y/N` = col_factor(levels = c("Y", "N")), 
+      `# of egg stages(start to finish)` = col_integer(), 
+      `Egg Stage at Beginning of exp` = col_factor(levels = c("1", "2", "3", "4", "5", "6", "7", "8", "9", "10"), ordered = TRUE), 
+      `Egg Stage end of exp` = col_factor(levels = c("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "Z"), ordered = TRUE))
+)
+```
+
+```{r}
+spec(data)
+```
+
+```{r}
+colnames(data) <- purrr::map_chr(colnames(data), \(x) stringr::str_replace_all(x, " ", "_"))
+colnames(data) <- purrr::map_chr(colnames(data), \(x) stringr::str_replace_all(x, "#", "num"))
+```
+
+```{r}
+data <- data %>% 
+  dplyr::mutate(death = dplyr::if_else(num_of_days_alive == 71, 0, 1))
+```
+
+# Simulated data to see if it matches the curve
+```{r}
+avg_surv_T = sample(c(40, 400), 32, replace = TRUE)
+rates = 1 / avg_surv_T
+crab_surv_T = rexp(n = length(rates), rate = rates)
+sim_dat = tibble(
+  C_or_T = "sim_dat",
+  avg_surv_T,
+  crab_surv_T
+)
+sim_dat = sim_dat %>% 
+  mutate(
+    num_of_days_alive = if_else(crab_surv_T > 71, 71, crab_surv_T),
+    death = if_else(crab_surv_T > 71, 0, 1)
+  )
+
+# data = data %>% bind_rows(sim_dat)
+```
+
+# Kaplan-Meier
+```{r}
+km_fit <- survfit(Surv(num_of_days_alive, death) ~ C_or_T,
+                  conf.int=0.5,
+                  data=data)
+```
+
+```{r}
+km_fit
+```
+
+
+```{r}
+autoplot(km_fit,
+         censor = FALSE,
+         xlab = "Days Since Start of Experiment",
+         ylab = "% Alive",
+         main = "Kaplan-Meier Fit of Sand Crab Mortality During Experiment") + 
+  labs(fill = "50% CI", color = "Observed") +
+  scale_color_hue(labels=c("t" = "treatment", "c"="control")) +
+  scale_fill_hue(labels=c("t" = "treatment", "c"="control")) +
+  scale_y_continuous(labels = scales::percent, limits=c(0,1))
+```
+
+## Write to CSV
+```{r}
+# km_curve = tibble(
+#   pct_surv = km_fit[["surv"]],
+#   time = km_fit[["time"]],
+#   grp = c(rep("c",10), rep("t", 11))
+# )
+# readr::write_csv(km_curve, "km_curve.csv")
+```
+
+# Log-rank test
+```{r}
+logrank_fit <- survdiff(Surv(num_of_days_alive, death) ~ C_or_T, data=data)
+```
+
+```{r}
+logrank_fit
+```
+
+
+
+# What did they do?
+
+I think I'll try a naive regression on days_alive ~ fiber_count to see if I get near their -5.5d/fiber...
+
+...well, it's -3.5. Kinda close.
+```{r}
+lmout = lm(num_of_days_alive ~ num_of_Yellow_fibers_ingested, data = data)
+summary(lmout)
+```
+
+Just treatment crabs?
+```{r}
+treatment_data <- data %>% 
+  dplyr::filter(C_or_T == "t")
+lmout = lm(num_of_days_alive ~ num_of_Yellow_fibers_ingested, data = treatment_data)
+summary(lmout)
+```
+
+What about adding in treatment
+```{r}
+lmout = lm(num_of_days_alive ~ num_of_Yellow_fibers_ingested + C_or_T, data = data)
+summary(lmout)
+```

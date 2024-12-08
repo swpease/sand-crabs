@@ -1,0 +1,58 @@
+---
+title: "Simulated Exp Data"
+author: "Scott Pease"
+date: "2024-11-20"
+output: html_document
+---
+
+**What do different Exponential survival curves look like?**
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(tibble)
+library(survival)
+library(ggfortify)
+library(glue)
+```
+
+# Simulated Data
+```{r}
+avg_surv_T = sample(c(40, 400), 32, replace = TRUE)
+old_crab_count = sum(avg_surv_T == 40)
+young_crab_count = 32 - old_crab_count
+avg_surv_T = c(avg_surv_T, rep(40, 32), rep(400, 32), rep(220, 32))
+rates = 1 / avg_surv_T
+crab_surv_T = rexp(n = length(rates), rate = rates)
+sim_dat = tibble(
+  grp = c(rep(glue("mixed {old_crab_count} 40d {young_crab_count} 400d"), 32), rep("40d", 32), rep("400d", 32), rep("220d", 32)),
+  avg_surv_T,
+  crab_surv_T
+)
+sim_dat = sim_dat %>% 
+  mutate(
+    censored_surv_T = if_else(crab_surv_T > 71, 71, crab_surv_T),
+    died = if_else(crab_surv_T > 71, 0, 1)
+  )
+```
+
+# Kaplan-Meier
+```{r}
+km_fit <- survfit(Surv(censored_surv_T, died) ~ grp,
+                  conf.int=0.5,
+                  data=sim_dat)
+```
+
+I mean... 220d is a bit high, and the mix is a bit low, on avg. 220d is simpler. These curves are sensitive to the draws because of the small sample sizes.
+```{r}
+autoplot(km_fit,
+         censor = FALSE,
+         conf.int = TRUE,
+         xlab = "Days Since Start of Experiment",
+         ylab = "% Alive",
+         main = "Kaplan-Meier Fit of Simulated Control Sand Crab Mortality") + 
+  scale_y_continuous(labels = scales::percent, limits=c(0,1))
+```
